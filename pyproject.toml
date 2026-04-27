@@ -26,6 +26,9 @@ dev = [
     "ruff>=0.6",
 ]
 
+[project.scripts]
+p2p = "prompt_to_policy.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/prompt_to_policy"]
 
