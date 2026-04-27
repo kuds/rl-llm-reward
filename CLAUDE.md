@@ -100,7 +100,7 @@ Ship v0 without this. Add it only after the basic loop works and produces at lea
 
 - Python 3.11+, type hints everywhere, `ruff` + `ruff format`.
 - `pytest` for tests. Every module in `reward/` and `envs/` gets unit tests. Training and LLM modules get smoke tests only.
-- No notebooks committed. Use scripts in `examples/`.
+- No development notebooks committed. The one exception is `examples/colab_demo.ipynb` — a reader-facing deliverable for the post, kept thin (install cell + a few cells calling the package). All actual logic lives in `src/` and is reachable from scripts in `examples/`.
 - Keep dependencies minimal: `gymnasium[mujoco]`, `stable-baselines3`, `anthropic`, `imageio`, `pydantic`, `tyro` (or `typer`) for the CLI. Resist adding more.
 - Determinism where possible: seed everything, log seeds, but accept that MuJoCo + PPO has irreducible variance and document it.
 
@@ -114,6 +114,7 @@ Ship v0 without this. Add it only after the basic loop works and produces at lea
 6. Implement the SB3 PPO training harness with fixed hyperparameters. Smoke-test that "run forward" reaches a reasonable return in 200k steps.
 7. Implement the LLM client and prompt template. Smoke-test on three prompts; commit the cached outputs.
 8. Wire the CLI. Run end-to-end on "make the cheetah run forward as fast as possible". Save video.
+8.5. Verify the Colab notebook (`examples/colab_demo.ipynb`) runs end-to-end on a fresh runtime, both the no-key quick test and the API-keyed full E2E.
 9. Stop. Show results to the user before adding Ant, Hopper, or the revision loop.
 
 After each step, run tests and commit. Do not skip ahead. If a step reveals that an earlier assumption was wrong, update this CLAUDE.md and the relevant ADR before continuing.
