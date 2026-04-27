@@ -25,7 +25,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 try:
-    from torch.utils.tensorboard import SummaryWriter as _TBSummaryWriter  # noqa: F401
+    import torch.utils.tensorboard  # noqa: F401  — probing import availability
 
     _HAS_TENSORBOARD = True
 except ImportError:

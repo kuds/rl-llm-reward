@@ -107,9 +107,7 @@ FEATURE_DOCS: dict[str, str] = {
     "speed_magnitude": "|x-velocity| of the torso (m/s). Always >= 0.",
     "vertical_velocity": "Signed z-velocity of the torso (m/s). Positive = upward.",
     "height": "z-position of the torso (m). ~0 at default pose; rises when the body lifts.",
-    "torso_uprightness": (
-        "cos(pitch_angle). +1 when level, 0 at 90 deg, -1 when fully inverted."
-    ),
+    "torso_uprightness": ("cos(pitch_angle). +1 when level, 0 at 90 deg, -1 when fully inverted."),
     "control_cost": (
         "Sum of squared joint actions. Always >= 0; use a negative weight to penalize energy."
     ),

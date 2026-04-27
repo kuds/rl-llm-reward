@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 from prompt_to_policy.envs import halfcheetah as hc
 from prompt_to_policy.llm import GeneratedReward, LLMRewardClient, parse_reward_spec
-
 
 # --- A minimal stub of the Anthropic Python SDK -----------------------------
 
@@ -51,9 +49,7 @@ class _StubMessages:
 
 class _StubAnthropic:
     def __init__(self, response_text: str, usage: _StubUsage | None = None):
-        self.messages = _StubMessages(
-            response_text=response_text, usage=usage or _StubUsage()
-        )
+        self.messages = _StubMessages(response_text=response_text, usage=usage or _StubUsage())
 
 
 GOOD_RESPONSE = json.dumps(
@@ -98,11 +94,7 @@ def test_parse_rejects_prose_around_json():
 
 def test_parse_rejects_unknown_field():
     bad = json.dumps(
-        {
-            "components": [
-                {"feature": "forward_velocity", "weight": 1.0, "transform": "abs"}
-            ]
-        }
+        {"components": [{"feature": "forward_velocity", "weight": 1.0, "transform": "abs"}]}
     )
     with pytest.raises(ValidationError):
         parse_reward_spec(bad)

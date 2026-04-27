@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -113,7 +113,7 @@ class LLMRewardClient:
             "spec": result.spec.model_dump(),
             "usage": result.usage,
             "estimated_cost_usd": result.estimated_cost_usd,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         path.write_text(json.dumps(payload, indent=2))
 

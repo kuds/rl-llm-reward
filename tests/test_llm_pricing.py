@@ -21,9 +21,7 @@ def test_known_model_uses_published_rate():
 def test_context_tier_suffix_strips():
     """A model id like 'claude-opus-4-7[1m]' falls back to the base rate."""
     base = estimate_cost_usd("claude-opus-4-7", {"input_tokens": 1_000_000, "output_tokens": 0})
-    tier = estimate_cost_usd(
-        "claude-opus-4-7[1m]", {"input_tokens": 1_000_000, "output_tokens": 0}
-    )
+    tier = estimate_cost_usd("claude-opus-4-7[1m]", {"input_tokens": 1_000_000, "output_tokens": 0})
     assert tier == base
 
 

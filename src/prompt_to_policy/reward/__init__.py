@@ -6,7 +6,7 @@ See ``docs/decisions/0001-reward-representation.md`` for the design.
 from .build import (
     FeatureFn,
     RewardFn,
-    RewardSmokeFailure,
+    RewardSmokeError,
     UnknownFeatureError,
     build_reward_fn,
     smoke_test_reward_fn,
@@ -17,7 +17,7 @@ __all__ = [
     "FeatureFn",
     "RewardComponent",
     "RewardFn",
-    "RewardSmokeFailure",
+    "RewardSmokeError",
     "RewardSpec",
     "UnknownFeatureError",
     "build_reward_fn",

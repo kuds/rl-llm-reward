@@ -52,11 +52,7 @@ def test_unknown_top_level_field_rejected():
 def test_unknown_component_field_rejected():
     with pytest.raises(ValidationError):
         RewardSpec.model_validate(
-            {
-                "components": [
-                    {"feature": "forward_velocity", "weight": 1.0, "transform": "abs"}
-                ]
-            }
+            {"components": [{"feature": "forward_velocity", "weight": 1.0, "transform": "abs"}]}
         )
 
 

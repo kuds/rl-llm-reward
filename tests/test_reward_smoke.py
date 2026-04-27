@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from prompt_to_policy.reward import (
-    RewardSmokeFailure,
+    RewardSmokeError,
     RewardSpec,
     build_reward_fn,
     smoke_test_reward_fn,
@@ -39,7 +39,7 @@ def test_smoke_test_catches_nan_reward():
 
     env = hc.make_env()
     try:
-        with pytest.raises(RewardSmokeFailure, match="non-finite"):
+        with pytest.raises(RewardSmokeError, match="non-finite"):
             smoke_test_reward_fn(nan_reward, env, n_steps=4, seed=0)
     finally:
         env.close()
@@ -51,7 +51,7 @@ def test_smoke_test_catches_exception():
 
     env = hc.make_env()
     try:
-        with pytest.raises(RewardSmokeFailure, match="KeyError"):
+        with pytest.raises(RewardSmokeError, match="KeyError"):
             smoke_test_reward_fn(boom, env, n_steps=4, seed=0)
     finally:
         env.close()
@@ -63,7 +63,7 @@ def test_smoke_test_catches_inf_reward():
 
     env = hc.make_env()
     try:
-        with pytest.raises(RewardSmokeFailure, match="non-finite"):
+        with pytest.raises(RewardSmokeError, match="non-finite"):
             smoke_test_reward_fn(inf_reward, env, n_steps=2, seed=0)
     finally:
         env.close()
@@ -132,7 +132,7 @@ def test_smoke_failure_chains_original_exception():
 
     env = hc.make_env()
     try:
-        with pytest.raises(RewardSmokeFailure) as exc_info:
+        with pytest.raises(RewardSmokeError) as exc_info:
             smoke_test_reward_fn(raiser, env, n_steps=2, seed=0)
         # __cause__ is set by `raise X from e`; preserves the original for debugging.
         assert exc_info.value.__cause__ is sentinel

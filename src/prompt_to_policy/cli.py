@@ -17,7 +17,7 @@ import dataclasses
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Union
+from typing import Annotated
 
 import tyro
 
@@ -117,7 +117,7 @@ class TrainSpec:
     """Skip rollout video rendering."""
 
 
-Command = Union[Run, Generate, TrainSpec]
+Command = Run | Generate | TrainSpec
 
 
 def _do_generate(cmd: Generate) -> int:

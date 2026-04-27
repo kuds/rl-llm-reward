@@ -25,7 +25,6 @@ from pathlib import Path
 from prompt_to_policy.reward import RewardSpec
 from prompt_to_policy.train import train
 
-
 SPEC = RewardSpec.model_validate(
     {
         "components": [
