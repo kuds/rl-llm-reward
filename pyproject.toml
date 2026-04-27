@@ -40,3 +40,6 @@ select = ["E", "F", "I", "B", "UP", "N", "SIM"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra"
+markers = [
+    "slow: tests that take more than a few seconds (training harness smoke).",
+]
