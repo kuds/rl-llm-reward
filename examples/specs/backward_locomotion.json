@@ -1,0 +1,7 @@
+{
+  "components": [
+    {"feature": "forward_velocity", "weight": -1.0},
+    {"feature": "control_cost", "weight": -0.05}
+  ],
+  "bias": 0.0
+}

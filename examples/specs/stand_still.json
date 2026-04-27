@@ -1,0 +1,7 @@
+{
+  "components": [
+    {"feature": "speed_magnitude", "weight": -1.0},
+    {"feature": "torso_uprightness", "weight": 0.5}
+  ],
+  "bias": 0.0
+}

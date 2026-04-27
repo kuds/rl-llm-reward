@@ -1,0 +1,40 @@
+# Build / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Project artifacts
+runs/
+wandb/
+mlruns/
+*.mp4
+*.gif
+tensorboard/
+
+# Secrets
+.env
+.env.*
+!.env.example
