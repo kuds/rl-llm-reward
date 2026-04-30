@@ -1,9 +1,17 @@
-"""Anthropic-backed reward generator with on-disk prompt-hash cache.
+"""Reward generators with on-disk prompt-hash caching.
 
-Cache flow:
-    cache_key = sha256(model || system_prompt || user_prompt)[:16]
-    cache_dir/<key>.json  on hit  -> return parsed spec, no API call
-                          on miss -> call API, parse, validate, write file
+Two implementations live here:
+
+- ``LLMRewardClient`` calls the Anthropic API.
+- ``LocalLLMRewardClient`` (in ``local_client.py``) loads a HuggingFace
+  causal-LM and runs it locally — the typical use case is Colab with a
+  GPU runtime.
+
+Both inherit from ``BaseRewardClient``, which owns the shared flow:
+
+    cache_key = sha256(provider_id || system_prompt || user_prompt)[:16]
+    cache_dir/<key>.json  on hit  -> return parsed spec, no model call
+                          on miss -> call the model, parse, validate, write file
 
 Validation flow (on cache miss):
     1. Strip markdown fences from the response
@@ -11,13 +19,14 @@ Validation flow (on cache miss):
 
 Smoke-testing the resulting RewardFn against a real env is the caller's
 job (see ``reward.smoke_test_reward_fn``). It is not done here because
-the LLM client doesn't know which env the spec is bound to.
+the client doesn't know which env the spec is bound to.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,35 +52,41 @@ class GeneratedReward:
     cache_key: str
 
 
-class LLMRewardClient:
-    """Generate a ``RewardSpec`` from a natural-language prompt, with caching."""
+class BaseRewardClient(ABC):
+    """Shared cache-and-parse flow. Subclasses implement ``_call_model``.
+
+    The cache key mixes the provider's identifying string (``model_id``)
+    with the system prompt and the user prompt, so changing any of them
+    invalidates affected cache entries automatically.
+    """
 
     def __init__(
         self,
         feature_docs: dict[str, str],
-        model: str = DEFAULT_MODEL,
-        cache_dir: Path | str | None = None,
-        anthropic_client: Any | None = None,
-        max_tokens: int = 1024,
+        model_id: str,
+        cache_dir: Path | str | None,
     ) -> None:
         self.feature_docs = feature_docs
-        self.model = model
+        self.model_id = model_id
         self.cache_dir = Path(cache_dir) if cache_dir is not None else None
-        self._anthropic = anthropic_client
-        self.max_tokens = max_tokens
         self.system_prompt = build_system_prompt(feature_docs)
 
+    # The "model" recorded on GeneratedReward / cache files.
     @property
-    def anthropic(self) -> Any:
-        if self._anthropic is None:
-            import anthropic  # local import: anthropic SDK is heavy
+    def model(self) -> str:
+        return self.model_id
 
-            self._anthropic = anthropic.Anthropic()
-        return self._anthropic
+    @abstractmethod
+    def _call_model(self, user_prompt: str) -> tuple[str, dict[str, int]]:
+        """Run the underlying model and return (raw_text, usage)."""
+
+    def _estimated_cost_usd(self, usage: dict[str, int]) -> float:
+        """Override in subclasses that aren't billed as Anthropic."""
+        return estimate_cost_usd(self.model_id, usage)
 
     def cache_key(self, user_prompt: str) -> str:
         h = hashlib.sha256()
-        h.update(self.model.encode("utf-8"))
+        h.update(self.model_id.encode("utf-8"))
         h.update(b"\0")
         h.update(self.system_prompt.encode("utf-8"))
         h.update(b"\0")
@@ -92,7 +107,7 @@ class LLMRewardClient:
             spec=RewardSpec.model_validate(data["spec"]),
             raw_response=data.get("raw_response", ""),
             user_prompt=data.get("user_prompt", user_prompt),
-            model=data.get("model", self.model),
+            model=data.get("model", self.model_id),
             cached=True,
             usage=data.get("usage", {}),
             estimated_cost_usd=float(data.get("estimated_cost_usd", 0.0)),
@@ -124,30 +139,58 @@ class LLMRewardClient:
             if cached is not None:
                 return cached
 
+        text, usage = self._call_model(user_prompt)
+        spec = parse_reward_spec(text)
+        result = GeneratedReward(
+            spec=spec,
+            raw_response=text,
+            user_prompt=user_prompt,
+            model=self.model_id,
+            cached=False,
+            usage=usage,
+            estimated_cost_usd=self._estimated_cost_usd(usage),
+            cache_key=key,
+        )
+        self._save_cache(result)
+        return result
+
+
+class LLMRewardClient(BaseRewardClient):
+    """Generate a ``RewardSpec`` from a natural-language prompt via Anthropic."""
+
+    def __init__(
+        self,
+        feature_docs: dict[str, str],
+        model: str = DEFAULT_MODEL,
+        cache_dir: Path | str | None = None,
+        anthropic_client: Any | None = None,
+        max_tokens: int = 1024,
+    ) -> None:
+        super().__init__(feature_docs=feature_docs, model_id=model, cache_dir=cache_dir)
+        self._anthropic = anthropic_client
+        self.max_tokens = max_tokens
+
+    @property
+    def anthropic(self) -> Any:
+        if self._anthropic is None:
+            import anthropic  # local import: anthropic SDK is heavy
+
+            self._anthropic = anthropic.Anthropic()
+        return self._anthropic
+
+    def _call_model(self, user_prompt: str) -> tuple[str, dict[str, int]]:
         response = self.anthropic.messages.create(
-            model=self.model,
+            model=self.model_id,
             max_tokens=self.max_tokens,
             system=self.system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
         text = _join_text_blocks(response.content)
-        spec = parse_reward_spec(text)
         usage = {
             "input_tokens": int(getattr(response.usage, "input_tokens", 0)),
             "output_tokens": int(getattr(response.usage, "output_tokens", 0)),
         }
-        result = GeneratedReward(
-            spec=spec,
-            raw_response=text,
-            user_prompt=user_prompt,
-            model=self.model,
-            cached=False,
-            usage=usage,
-            estimated_cost_usd=estimate_cost_usd(self.model, usage),
-            cache_key=key,
-        )
-        self._save_cache(result)
-        return result
+        return text, usage
 
 
 def _join_text_blocks(content: Any) -> str:

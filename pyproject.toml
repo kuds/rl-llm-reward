@@ -25,6 +25,15 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
+# Run the reward LLM locally (e.g. on a Colab GPU) instead of calling the
+# Anthropic API. ``bitsandbytes`` is the 4-/8-bit quantizer that makes
+# 7-8B models fit on a T4. ``accelerate`` is required by transformers'
+# ``device_map="auto"``. ``torch`` is already pulled in by SB3.
+local = [
+    "transformers>=4.45",
+    "accelerate>=0.33",
+    "bitsandbytes>=0.43",
+]
 
 [project.scripts]
 p2p = "prompt_to_policy.cli:main"

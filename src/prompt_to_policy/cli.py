@@ -9,6 +9,10 @@ Three subcommands:
 Hyperparameters are fixed per env (see HalfCheetahPPOConfig). The CLI
 exposes only what the user needs to drive the demo: the prompt, the
 training budget, the seed, the model, and where artifacts go.
+
+Reward-generation backend is selected by ``--provider``: ``anthropic``
+(default) hits the Claude API; ``local`` loads a HuggingFace causal LM
+locally. ``--model`` selects the model id within the chosen provider.
 """
 
 from __future__ import annotations
@@ -17,16 +21,26 @@ import dataclasses
 import json
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import tyro
 
 from prompt_to_policy.envs import halfcheetah as hc
-from prompt_to_policy.llm import DEFAULT_MODEL, LLMRewardClient
+from prompt_to_policy.llm import (
+    DEFAULT_LOCAL_MODEL,
+    DEFAULT_MODEL,
+    DEFAULT_QUANTIZATION,
+    BaseRewardClient,
+    LLMRewardClient,
+    LocalLLMRewardClient,
+)
 from prompt_to_policy.reward import RewardSpec
 from prompt_to_policy.train import HALFCHEETAH_PPO, train
 
 DEFAULT_CACHE_DIR = "examples/cached_responses"
+
+Provider = Literal["anthropic", "local"]
+Quantization = Literal["4bit", "8bit", "none"]
 
 
 def _resolve_timesteps(timesteps: int | None, quick: bool) -> int:
@@ -35,6 +49,35 @@ def _resolve_timesteps(timesteps: int | None, quick: bool) -> int:
     if quick:
         return HALFCHEETAH_PPO.quick_timesteps
     return HALFCHEETAH_PPO.total_timesteps
+
+
+def _resolve_model(provider: Provider, model: str | None) -> str:
+    if model is not None:
+        return model
+    return DEFAULT_LOCAL_MODEL if provider == "local" else DEFAULT_MODEL
+
+
+def _build_client(
+    provider: Provider,
+    model: str,
+    cache_dir: str | None,
+    quantization: Quantization,
+) -> BaseRewardClient:
+    cache = cache_dir if cache_dir else None
+    if provider == "anthropic":
+        return LLMRewardClient(
+            feature_docs=hc.FEATURE_DOCS,
+            model=model,
+            cache_dir=cache,
+        )
+    if provider == "local":
+        return LocalLLMRewardClient(
+            feature_docs=hc.FEATURE_DOCS,
+            model_id=model,
+            cache_dir=cache,
+            quantization=quantization,
+        )
+    raise ValueError(f"unknown provider: {provider}")
 
 
 @dataclasses.dataclass
@@ -53,8 +96,14 @@ class Run:
     seed: int = 0
     """Random seed."""
 
-    model: str = DEFAULT_MODEL
-    """Anthropic model id for reward generation."""
+    provider: Provider = "anthropic"
+    """Reward-generation backend: 'anthropic' (Claude API) or 'local' (HF model)."""
+
+    model: str | None = None
+    """Model id. Default depends on --provider."""
+
+    quantization: Quantization = DEFAULT_QUANTIZATION
+    """Quantization for --provider local: '4bit' (T4-friendly), '8bit', or 'none'."""
 
     cache_dir: str | None = DEFAULT_CACHE_DIR
     """Directory for cached LLM responses. Pass an empty string to disable caching."""
@@ -76,8 +125,14 @@ class Generate:
     prompt: Annotated[str, tyro.conf.Positional]
     """Natural-language description of the desired behavior."""
 
-    model: str = DEFAULT_MODEL
-    """Anthropic model id."""
+    provider: Provider = "anthropic"
+    """Reward-generation backend: 'anthropic' (Claude API) or 'local' (HF model)."""
+
+    model: str | None = None
+    """Model id. Default depends on --provider."""
+
+    quantization: Quantization = DEFAULT_QUANTIZATION
+    """Quantization for --provider local: '4bit', '8bit', or 'none'."""
 
     cache_dir: str | None = DEFAULT_CACHE_DIR
     """Directory for cached LLM responses."""
@@ -121,15 +176,12 @@ Command = Run | Generate | TrainSpec
 
 
 def _do_generate(cmd: Generate) -> int:
-    cache_dir = cmd.cache_dir if cmd.cache_dir else None
-    client = LLMRewardClient(
-        feature_docs=hc.FEATURE_DOCS,
-        model=cmd.model,
-        cache_dir=cache_dir,
-    )
+    model = _resolve_model(cmd.provider, cmd.model)
+    client = _build_client(cmd.provider, model, cmd.cache_dir, cmd.quantization)
     gen = client.generate(cmd.prompt, force_refresh=cmd.force_refresh)
     payload = {
         "prompt": cmd.prompt,
+        "provider": cmd.provider,
         "model": gen.model,
         "cached": gen.cached,
         "cache_key": gen.cache_key,
@@ -142,15 +194,12 @@ def _do_generate(cmd: Generate) -> int:
 
 
 def _do_run(cmd: Run) -> int:
-    cache_dir = cmd.cache_dir if cmd.cache_dir else None
     timesteps = _resolve_timesteps(cmd.timesteps, cmd.quick)
+    model = _resolve_model(cmd.provider, cmd.model)
+    client = _build_client(cmd.provider, model, cmd.cache_dir, cmd.quantization)
 
-    client = LLMRewardClient(
-        feature_docs=hc.FEATURE_DOCS,
-        model=cmd.model,
-        cache_dir=cache_dir,
-    )
     print(f"prompt    : {cmd.prompt!r}", file=sys.stderr)
+    print(f"provider  : {cmd.provider} ({model})", file=sys.stderr)
     gen = client.generate(cmd.prompt, force_refresh=cmd.force_refresh)
     print(f"  cached  : {gen.cached}", file=sys.stderr)
     print(f"  cost    : ${gen.estimated_cost_usd:.4f}", file=sys.stderr)
