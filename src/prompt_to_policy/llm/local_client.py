@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from .client import BaseRewardClient
+from .client import BaseRewardClient, PromptBuilder
 
 DEFAULT_LOCAL_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 DEFAULT_QUANTIZATION: Literal["4bit", "8bit", "none"] = "4bit"
@@ -49,12 +49,20 @@ class LocalLLMRewardClient(BaseRewardClient):
         torch_dtype: str = "auto",
         hf_model: Any | None = None,
         hf_tokenizer: Any | None = None,
+        build_prompt: PromptBuilder | None = None,
+        env_name: str = "halfcheetah",
     ) -> None:
         # The cache key has to distinguish e.g. Qwen-4bit from Qwen-8bit, which
         # may emit subtly different specs. Bake the quantization mode into the
         # model_id used for cache hashing.
         cache_model_id = f"{model_id}@{quantization}"
-        super().__init__(feature_docs=feature_docs, model_id=cache_model_id, cache_dir=cache_dir)
+        super().__init__(
+            feature_docs=feature_docs,
+            model_id=cache_model_id,
+            cache_dir=cache_dir,
+            build_prompt=build_prompt,
+            env_name=env_name,
+        )
         self.hf_model_id = model_id
         self.quantization = quantization
         self.device_map = device_map

@@ -45,6 +45,36 @@ def test_run_no_video_flag():
     assert cmd.no_video is True
 
 
+def test_run_env_defaults_to_halfcheetah():
+    cmd = tyro.cli(Command, args=["run", "go forward"])
+    assert isinstance(cmd, Run)
+    assert cmd.env == "halfcheetah"
+
+
+def test_run_env_hopper():
+    cmd = tyro.cli(Command, args=["run", "hop forward", "--env", "hopper"])
+    assert isinstance(cmd, Run)
+    assert cmd.env == "hopper"
+
+
+def test_run_env_ant():
+    cmd = tyro.cli(Command, args=["run", "walk forward", "--env", "ant"])
+    assert isinstance(cmd, Run)
+    assert cmd.env == "ant"
+
+
+def test_run_provider_gemini():
+    cmd = tyro.cli(Command, args=["run", "go forward", "--provider", "gemini"])
+    assert isinstance(cmd, Run)
+    assert cmd.provider == "gemini"
+
+
+def test_run_provider_local():
+    cmd = tyro.cli(Command, args=["run", "go forward", "--provider", "local"])
+    assert isinstance(cmd, Run)
+    assert cmd.provider == "local"
+
+
 def test_generate_parses():
     cmd = tyro.cli(Command, args=["generate", "stand still"])
     assert isinstance(cmd, Generate)
@@ -68,15 +98,29 @@ def test_train_spec_parses_path(tmp_path):
 
 def test_resolve_timesteps_explicit_wins():
     # Explicit --timesteps wins over --quick.
-    assert _resolve_timesteps(timesteps=42, quick=True) == 42
+    assert _resolve_timesteps("halfcheetah", timesteps=42, quick=True) == 42
 
 
 def test_resolve_timesteps_quick_when_no_explicit():
-    assert _resolve_timesteps(timesteps=None, quick=True) == HALFCHEETAH_PPO.quick_timesteps
+    assert (
+        _resolve_timesteps("halfcheetah", timesteps=None, quick=True)
+        == HALFCHEETAH_PPO.quick_timesteps
+    )
 
 
 def test_resolve_timesteps_default():
-    assert _resolve_timesteps(timesteps=None, quick=False) == HALFCHEETAH_PPO.total_timesteps
+    assert (
+        _resolve_timesteps("halfcheetah", timesteps=None, quick=False)
+        == HALFCHEETAH_PPO.total_timesteps
+    )
+
+
+def test_resolve_timesteps_uses_per_env_config():
+    from prompt_to_policy.train import HOPPER_PPO
+
+    assert (
+        _resolve_timesteps("hopper", timesteps=None, quick=True) == HOPPER_PPO.quick_timesteps
+    )
 
 
 def test_unknown_subcommand_errors():

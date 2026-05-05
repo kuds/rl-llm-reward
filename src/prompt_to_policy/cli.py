@@ -6,13 +6,19 @@ Three subcommands:
   p2p generate "<prompt>"     # prompt -> LLM, print spec, no training
   p2p train-spec <path>       # train from a JSON RewardSpec, skip LLM
 
-Hyperparameters are fixed per env (see HalfCheetahPPOConfig). The CLI
-exposes only what the user needs to drive the demo: the prompt, the
-training budget, the seed, the model, and where artifacts go.
+Hyperparameters are fixed per env (see ``train/config.py``). The CLI
+exposes only what the user needs to drive the demo: the env, the
+prompt, the training budget, the seed, the provider/model, and where
+artifacts go.
 
-Reward-generation backend is selected by ``--provider``: ``anthropic``
-(default) hits the Claude API; ``local`` loads a HuggingFace causal LM
-locally. ``--model`` selects the model id within the chosen provider.
+Provider is chosen explicitly via ``--provider``:
+- ``anthropic`` (default): Claude API. Needs ``ANTHROPIC_API_KEY``.
+- ``gemini``: Google Gemini API. Needs ``GEMINI_API_KEY`` (or
+  ``GOOGLE_API_KEY``) and the ``google-genai`` package.
+- ``local``: HuggingFace causal-LM running on the local machine. Needs
+  the ``[local]`` extras (transformers, accelerate, bitsandbytes) and a
+  GPU big enough for the chosen model. Use this on Colab when the
+  runtime is an A100/L4.
 """
 
 from __future__ import annotations
@@ -25,57 +31,79 @@ from typing import Annotated, Literal
 
 import tyro
 
-from prompt_to_policy.envs import halfcheetah as hc
+from prompt_to_policy import envs
 from prompt_to_policy.llm import (
+    DEFAULT_GEMINI_MODEL,
     DEFAULT_LOCAL_MODEL,
     DEFAULT_MODEL,
     DEFAULT_QUANTIZATION,
     BaseRewardClient,
+    GeminiRewardClient,
     LLMRewardClient,
     LocalLLMRewardClient,
 )
 from prompt_to_policy.reward import RewardSpec
-from prompt_to_policy.train import HALFCHEETAH_PPO, train
+from prompt_to_policy.train import PPO_CONFIGS, train
 
 DEFAULT_CACHE_DIR = "examples/cached_responses"
 
-Provider = Literal["anthropic", "local"]
+EnvName = Literal["halfcheetah", "hopper", "ant"]
+Provider = Literal["anthropic", "gemini", "local"]
 Quantization = Literal["4bit", "8bit", "none"]
 
 
-def _resolve_timesteps(timesteps: int | None, quick: bool) -> int:
+def _resolve_timesteps(env: str, timesteps: int | None, quick: bool) -> int:
+    config = PPO_CONFIGS[env]
     if timesteps is not None:
         return timesteps
     if quick:
-        return HALFCHEETAH_PPO.quick_timesteps
-    return HALFCHEETAH_PPO.total_timesteps
+        return config.quick_timesteps
+    return config.total_timesteps
 
 
 def _resolve_model(provider: Provider, model: str | None) -> str:
     if model is not None:
         return model
-    return DEFAULT_LOCAL_MODEL if provider == "local" else DEFAULT_MODEL
+    if provider == "local":
+        return DEFAULT_LOCAL_MODEL
+    if provider == "gemini":
+        return DEFAULT_GEMINI_MODEL
+    return DEFAULT_MODEL
 
 
 def _build_client(
+    env: str,
     provider: Provider,
     model: str,
     cache_dir: str | None,
     quantization: Quantization,
 ) -> BaseRewardClient:
     cache = cache_dir if cache_dir else None
+    spec = envs.get(env)
     if provider == "anthropic":
         return LLMRewardClient(
-            feature_docs=hc.FEATURE_DOCS,
+            feature_docs=spec.feature_docs,
             model=model,
             cache_dir=cache,
+            build_prompt=spec.build_system_prompt,
+            env_name=env,
+        )
+    if provider == "gemini":
+        return GeminiRewardClient(
+            feature_docs=spec.feature_docs,
+            model=model,
+            cache_dir=cache,
+            build_prompt=spec.build_system_prompt,
+            env_name=env,
         )
     if provider == "local":
         return LocalLLMRewardClient(
-            feature_docs=hc.FEATURE_DOCS,
+            feature_docs=spec.feature_docs,
             model_id=model,
             cache_dir=cache,
             quantization=quantization,
+            build_prompt=spec.build_system_prompt,
+            env_name=env,
         )
     raise ValueError(f"unknown provider: {provider}")
 
@@ -87,17 +115,20 @@ class Run:
     prompt: Annotated[str, tyro.conf.Positional]
     """Natural-language description of the desired behavior."""
 
+    env: EnvName = "halfcheetah"
+    """Which env to train: 'halfcheetah', 'hopper', or 'ant'."""
+
     timesteps: int | None = None
-    """Total training timesteps. Defaults to 1M; --quick overrides to 200k."""
+    """Total training timesteps. Defaults to env-specific budget; --quick uses the quick budget."""
 
     quick: bool = False
-    """Use the 200k development budget. Ignored if --timesteps is set explicitly."""
+    """Use the per-env quick development budget. Ignored if --timesteps is set explicitly."""
 
     seed: int = 0
     """Random seed."""
 
     provider: Provider = "anthropic"
-    """Reward-generation backend: 'anthropic' (Claude API) or 'local' (HF model)."""
+    """Reward-generation backend: 'anthropic', 'gemini', or 'local'."""
 
     model: str | None = None
     """Model id. Default depends on --provider."""
@@ -117,6 +148,9 @@ class Run:
     no_video: bool = False
     """Skip rollout video rendering (useful for headless runs without an OpenGL backend)."""
 
+    progress_bar: bool = False
+    """Show a tqdm progress bar during training (requires the rich/tqdm extra)."""
+
 
 @dataclasses.dataclass
 class Generate:
@@ -125,8 +159,11 @@ class Generate:
     prompt: Annotated[str, tyro.conf.Positional]
     """Natural-language description of the desired behavior."""
 
+    env: EnvName = "halfcheetah"
+    """Which env's feature registry to use: 'halfcheetah', 'hopper', or 'ant'."""
+
     provider: Provider = "anthropic"
-    """Reward-generation backend: 'anthropic' (Claude API) or 'local' (HF model)."""
+    """Reward-generation backend: 'anthropic', 'gemini', or 'local'."""
 
     model: str | None = None
     """Model id. Default depends on --provider."""
@@ -146,21 +183,23 @@ class TrainSpec:
     """Train a policy from a hand-written or pre-generated reward spec.
 
     Useful for offline reproductions and for the post's hand-written
-    baselines (forward locomotion, stand still) without burning API
-    spend.
+    baselines without burning API spend.
     """
 
     spec: Annotated[Path, tyro.conf.Positional]
     """Path to a JSON file matching the RewardSpec schema."""
 
+    env: EnvName = "halfcheetah"
+    """Which env to train: 'halfcheetah', 'hopper', or 'ant'."""
+
     prompt: str = "(no prompt — spec from file)"
     """Prompt string to record in summary.json. Has no effect on training."""
 
     timesteps: int | None = None
-    """Total training timesteps. Defaults to 1M; --quick overrides to 200k."""
+    """Total training timesteps. Defaults to env-specific budget; --quick uses the quick budget."""
 
     quick: bool = False
-    """Use the 200k development budget."""
+    """Use the per-env quick budget."""
 
     seed: int = 0
     """Random seed."""
@@ -171,16 +210,20 @@ class TrainSpec:
     no_video: bool = False
     """Skip rollout video rendering."""
 
+    progress_bar: bool = False
+    """Show a tqdm progress bar during training."""
+
 
 Command = Run | Generate | TrainSpec
 
 
 def _do_generate(cmd: Generate) -> int:
     model = _resolve_model(cmd.provider, cmd.model)
-    client = _build_client(cmd.provider, model, cmd.cache_dir, cmd.quantization)
+    client = _build_client(cmd.env, cmd.provider, model, cmd.cache_dir, cmd.quantization)
     gen = client.generate(cmd.prompt, force_refresh=cmd.force_refresh)
     payload = {
         "prompt": cmd.prompt,
+        "env": cmd.env,
         "provider": cmd.provider,
         "model": gen.model,
         "cached": gen.cached,
@@ -194,10 +237,11 @@ def _do_generate(cmd: Generate) -> int:
 
 
 def _do_run(cmd: Run) -> int:
-    timesteps = _resolve_timesteps(cmd.timesteps, cmd.quick)
+    timesteps = _resolve_timesteps(cmd.env, cmd.timesteps, cmd.quick)
     model = _resolve_model(cmd.provider, cmd.model)
-    client = _build_client(cmd.provider, model, cmd.cache_dir, cmd.quantization)
+    client = _build_client(cmd.env, cmd.provider, model, cmd.cache_dir, cmd.quantization)
 
+    print(f"env       : {cmd.env}", file=sys.stderr)
     print(f"prompt    : {cmd.prompt!r}", file=sys.stderr)
     print(f"provider  : {cmd.provider} ({model})", file=sys.stderr)
     gen = client.generate(cmd.prompt, force_refresh=cmd.force_refresh)
@@ -210,10 +254,12 @@ def _do_run(cmd: Run) -> int:
     result = train(
         spec=gen.spec,
         prompt=cmd.prompt,
+        env=cmd.env,
         timesteps=timesteps,
         run_dir=Path(cmd.run_dir) if cmd.run_dir else None,
         seed=cmd.seed,
         record_video=not cmd.no_video,
+        progress_bar=cmd.progress_bar,
     )
 
     print(f"\ndone in {result.train_seconds:.1f}s", file=sys.stderr)
@@ -226,11 +272,12 @@ def _do_run(cmd: Run) -> int:
 
 
 def _do_train_spec(cmd: TrainSpec) -> int:
-    timesteps = _resolve_timesteps(cmd.timesteps, cmd.quick)
+    timesteps = _resolve_timesteps(cmd.env, cmd.timesteps, cmd.quick)
 
     spec_text = cmd.spec.read_text()
     spec = RewardSpec.model_validate_json(spec_text)
 
+    print(f"env       : {cmd.env}", file=sys.stderr)
     print(f"spec      : {cmd.spec}", file=sys.stderr)
     print(f"prompt    : {cmd.prompt!r}", file=sys.stderr)
     print(f"training  : {timesteps} timesteps, seed={cmd.seed}", file=sys.stderr)
@@ -238,10 +285,12 @@ def _do_train_spec(cmd: TrainSpec) -> int:
     result = train(
         spec=spec,
         prompt=cmd.prompt,
+        env=cmd.env,
         timesteps=timesteps,
         run_dir=Path(cmd.run_dir) if cmd.run_dir else None,
         seed=cmd.seed,
         record_video=not cmd.no_video,
+        progress_bar=cmd.progress_bar,
     )
 
     print(f"\ndone in {result.train_seconds:.1f}s", file=sys.stderr)

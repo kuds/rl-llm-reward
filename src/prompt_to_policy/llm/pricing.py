@@ -11,9 +11,14 @@ from __future__ import annotations
 
 # (input_per_mtok_usd, output_per_mtok_usd). As of 2026-04.
 PRICING_PER_MTOK_USD: dict[str, tuple[float, float]] = {
+    # Anthropic
     "claude-opus-4-7": (15.0, 75.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (0.80, 4.0),
+    # Google Gemini (pay-as-you-go list prices).
+    "gemini-2.5-pro": (1.25, 10.0),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-flash-lite": (0.10, 0.40),
 }
 
 
