@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,9 +36,12 @@ from typing import Any
 from prompt_to_policy.reward import RewardSpec
 
 from .pricing import estimate_cost_usd
-from .templates.halfcheetah import PROMPT_VERSION, build_system_prompt
+from .templates import PROMPT_VERSION
+from .templates import build_halfcheetah_system_prompt as _default_build_prompt
 
 DEFAULT_MODEL = "claude-opus-4-7"
+
+PromptBuilder = Callable[[dict[str, str]], str]
 
 
 @dataclass
@@ -57,7 +61,8 @@ class BaseRewardClient(ABC):
 
     The cache key mixes the provider's identifying string (``model_id``)
     with the system prompt and the user prompt, so changing any of them
-    invalidates affected cache entries automatically.
+    (or switching envs, since each env produces a different system
+    prompt) invalidates affected cache entries automatically.
     """
 
     def __init__(
@@ -65,11 +70,16 @@ class BaseRewardClient(ABC):
         feature_docs: dict[str, str],
         model_id: str,
         cache_dir: Path | str | None,
+        *,
+        build_prompt: PromptBuilder | None = None,
+        env_name: str = "halfcheetah",
     ) -> None:
         self.feature_docs = feature_docs
         self.model_id = model_id
+        self.env_name = env_name
         self.cache_dir = Path(cache_dir) if cache_dir is not None else None
-        self.system_prompt = build_system_prompt(feature_docs)
+        builder = build_prompt or _default_build_prompt
+        self.system_prompt = builder(feature_docs)
 
     # The "model" recorded on GeneratedReward / cache files.
     @property
@@ -122,6 +132,7 @@ class BaseRewardClient(ABC):
         payload = {
             "cache_key": result.cache_key,
             "model": result.model,
+            "env": self.env_name,
             "prompt_version": PROMPT_VERSION,
             "user_prompt": result.user_prompt,
             "raw_response": result.raw_response,
@@ -165,8 +176,17 @@ class LLMRewardClient(BaseRewardClient):
         cache_dir: Path | str | None = None,
         anthropic_client: Any | None = None,
         max_tokens: int = 1024,
+        *,
+        build_prompt: PromptBuilder | None = None,
+        env_name: str = "halfcheetah",
     ) -> None:
-        super().__init__(feature_docs=feature_docs, model_id=model, cache_dir=cache_dir)
+        super().__init__(
+            feature_docs=feature_docs,
+            model_id=model,
+            cache_dir=cache_dir,
+            build_prompt=build_prompt,
+            env_name=env_name,
+        )
         self._anthropic = anthropic_client
         self.max_tokens = max_tokens
 

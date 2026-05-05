@@ -1,13 +1,18 @@
-"""SB3 PPO training harness with fixed hyperparameters.
+"""SB3 PPO training harness.
+
+Env-agnostic: pick the env by short name (``halfcheetah``, ``hopper``,
+``ant``) and the harness pulls the matching ``EnvSpec`` and ``PPOConfig``
+from their registries. Hyperparameters are fixed per env; the LLM never
+touches them.
 
 The flow:
     1. Build a callable reward from the spec; smoke-test it on real env steps.
     2. Construct a vec env with the DSL reward wrapper and (optional) VecNormalize.
-    3. Train PPO with hyperparameters from ``HalfCheetahPPOConfig``.
+    3. Train PPO with hyperparameters from the matching ``PPOConfig``.
     4. Evaluate the deterministic policy on a fresh non-normalized env, returning
        per-episode returns on the *real* (un-normalized) reward scale.
     5. Render an mp4 rollout video.
-    6. Write ``summary.json`` containing prompt, spec, config, timing, and metrics.
+    6. Write ``summary.json`` containing prompt, env, spec, config, timing, and metrics.
 """
 
 from __future__ import annotations
@@ -31,18 +36,22 @@ try:
 except ImportError:
     _HAS_TENSORBOARD = False
 
-from prompt_to_policy.envs import halfcheetah as hc
+from prompt_to_policy import envs
+from prompt_to_policy.envs.registry import EnvSpec
 from prompt_to_policy.render import record_rollout
 from prompt_to_policy.reward import RewardSpec, build_reward_fn, smoke_test_reward_fn
 
-from .config import HALFCHEETAH_PPO, HalfCheetahPPOConfig
+from .config import PPO_CONFIGS, PPOConfig
 from .wrappers import DSLRewardWrapper
+
+DEFAULT_ENV = "halfcheetah"
 
 
 @dataclass
 class RunResult:
     run_id: str
     run_dir: Path
+    env: str
     final_mean_return: float
     final_mean_length: float
     eval_episodes: int
@@ -53,6 +62,7 @@ class RunResult:
 
 
 def _make_train_env(
+    env_spec: EnvSpec,
     reward_fn,
     *,
     n_envs: int,
@@ -60,7 +70,7 @@ def _make_train_env(
     normalize_reward: bool,
 ):
     def make_one():
-        env = hc.make_env()
+        env = env_spec.make_env()
         return DSLRewardWrapper(env, reward_fn)
 
     vec = DummyVecEnv([make_one for _ in range(n_envs)])
@@ -69,9 +79,9 @@ def _make_train_env(
     return vec
 
 
-def _make_eval_env(reward_fn) -> gym.Env:
+def _make_eval_env(env_spec: EnvSpec, reward_fn) -> gym.Env:
     """Single non-normalized env with rgb_array rendering for video and real-scale return."""
-    env = hc.make_env(render_mode="rgb_array")
+    env = env_spec.make_env(render_mode="rgb_array")
     return DSLRewardWrapper(env, reward_fn)
 
 
@@ -79,7 +89,8 @@ def train(
     *,
     spec: RewardSpec,
     prompt: str,
-    config: HalfCheetahPPOConfig = HALFCHEETAH_PPO,
+    env: str = DEFAULT_ENV,
+    config: PPOConfig | None = None,
     timesteps: int | None = None,
     seed: int = 0,
     run_dir: Path | str | None = None,
@@ -87,12 +98,15 @@ def train(
     record_video: bool = True,
     progress_bar: bool = False,
 ) -> RunResult:
-    """Train PPO on the HalfCheetah env with an LLM-emitted reward.
+    """Train PPO on the chosen env with an LLM-emitted reward.
 
-    Hyperparameters come from ``config`` and are not LLM-tunable.
-    Defaults to ``config.total_timesteps``; pass a smaller ``timesteps``
-    for development runs.
+    ``env`` selects which env / feature registry / PPO config to use.
+    ``config`` overrides the default config for that env. Hyperparameters
+    are not LLM-tunable.
     """
+    env_spec = envs.get(env)
+    if config is None:
+        config = PPO_CONFIGS[env]
     if timesteps is None:
         timesteps = config.total_timesteps
     if run_id is None:
@@ -100,15 +114,16 @@ def train(
     run_dir = Path(run_dir) if run_dir is not None else Path("runs") / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    reward_fn = build_reward_fn(spec, hc.FEATURES)
+    reward_fn = build_reward_fn(spec, env_spec.features)
 
-    smoke_env = hc.make_env()
+    smoke_env = env_spec.make_env()
     try:
         smoke_test_reward_fn(reward_fn, smoke_env, n_steps=8, seed=seed)
     finally:
         smoke_env.close()
 
     train_vec = _make_train_env(
+        env_spec,
         reward_fn,
         n_envs=config.n_envs,
         normalize_obs=config.normalize_obs,
@@ -162,7 +177,7 @@ def train(
 
     eval_returns: list[float] = []
     eval_lengths: list[int] = []
-    eval_env = _make_eval_env(reward_fn)
+    eval_env = _make_eval_env(env_spec, reward_fn)
     try:
         for ep_idx in range(config.eval_episodes):
             obs, _ = eval_env.reset(seed=seed + 1 + ep_idx)
@@ -185,7 +200,7 @@ def train(
 
     video_path: Path | None = None
     if record_video:
-        video_env = _make_eval_env(reward_fn)
+        video_env = _make_eval_env(env_spec, reward_fn)
         try:
             video_path = run_dir / "rollout.mp4"
             record_rollout(
@@ -202,6 +217,8 @@ def train(
 
     summary = {
         "run_id": run_id,
+        "env": env,
+        "env_id": env_spec.env_id,
         "prompt": prompt,
         "spec": spec.model_dump(),
         "config": asdict(config),
@@ -223,6 +240,7 @@ def train(
     return RunResult(
         run_id=run_id,
         run_dir=run_dir,
+        env=env,
         final_mean_return=final_mean_return,
         final_mean_length=final_mean_length,
         eval_episodes=config.eval_episodes,

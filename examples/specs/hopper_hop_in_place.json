@@ -1,0 +1,8 @@
+{
+  "components": [
+    {"feature": "height", "weight": 1.0},
+    {"feature": "speed_magnitude", "weight": -0.5},
+    {"feature": "alive_bonus", "weight": 1.0}
+  ],
+  "bias": 0.0
+}

@@ -25,14 +25,24 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
-# Run the reward LLM locally (e.g. on a Colab GPU) instead of calling the
-# Anthropic API. ``bitsandbytes`` is the 4-/8-bit quantizer that makes
-# 7-8B models fit on a T4. ``accelerate`` is required by transformers'
-# ``device_map="auto"``. ``torch`` is already pulled in by SB3.
+# Reward generation via Google Gemini. Adds the ``google-genai`` SDK; the
+# Anthropic provider remains available without this extra installed.
+gemini = [
+    "google-genai>=0.3",
+]
+# Run the reward LLM locally (e.g. on a Colab GPU) instead of calling an
+# API. ``bitsandbytes`` is the 4-/8-bit quantizer that lets 7-8B models
+# fit on a T4 (and lets larger models fit on an A100 / L4).
+# ``accelerate`` is required by transformers' ``device_map="auto"``.
+# ``torch`` is already pulled in by SB3.
 local = [
     "transformers>=4.45",
     "accelerate>=0.33",
     "bitsandbytes>=0.43",
+]
+# Convenience: install everything (all providers + dev tools).
+all = [
+    "prompt-to-policy[dev,gemini,local]",
 ]
 
 [project.scripts]
@@ -49,9 +59,11 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP", "N", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
-# The HalfCheetah prompt template's few-shot examples are intentionally on
-# single lines so that the rendered LLM prompt matches what we tested.
+# The prompt templates' few-shot examples are intentionally on single
+# lines so that the rendered LLM prompt matches what we tested.
 "src/prompt_to_policy/llm/templates/halfcheetah.py" = ["E501"]
+"src/prompt_to_policy/llm/templates/hopper.py" = ["E501"]
+"src/prompt_to_policy/llm/templates/ant.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
